@@ -17,13 +17,17 @@ Before finishing any task: type-check, lint, and run the tests for the files you
 
 ## Project structure
 
-- `src/main.ts` — bootstrap (global pipes, prefix, Swagger, CORS)
+- `src/main.ts` — bootstrap (global pipes, `/api/v1` prefix, CORS, Swagger at `/docs`)
 - `src/app.module.ts` — root module; every feature module is registered here
-- `src/features/<feature>/` — one folder per domain feature. `src/features/auth/` is the reference implementation:
+- `src/shared/` — cross-feature code, imported by more than one `src/features/*` module. `src/shared/supabase/` (client providers, config) and `src/shared/auth/` (`JwtAuthGuard`, `@CurrentUser()`, `AuthenticatedUser`) are the current shared modules. Ask before adding a new top-level folder here.
+- `src/features/<feature>/` — one folder per domain feature (`auth`, `resources`, `profiles`, `uploads`):
   - `<feature>.module.ts`, `<feature>.controller.ts`, `<feature>.service.ts`
-  - `dto/`, `interfaces/`, `guards/`, `decorators/` — only when the feature needs them
-  - `<feature>-config.ts` — feature-specific configuration
+  - `dto/`, `interfaces/` — only when the feature needs them; guards/decorators meant for reuse across features go in `src/shared/`, not inside a single feature
+  - `<feature>-config.ts` — feature-specific configuration (only for config not already in `src/shared/supabase/supabase-config.ts`)
+- `supabase/` — Supabase CLI project: `migrations/` (source of truth for schema), `config.toml`, generated `database.types.ts` (re-exported from `src/shared/supabase/database.types.ts` for a stable in-`src` import path)
 - `test/` — e2e tests
+- `docs/specs/<feature>.md` — what a feature does and why, written after it ships (see `/pr`)
+- `docs/handoffs/<feature>.md` — frontend integration doc per feature, written after it ships (see `/pr`)
 
 ## Conventions
 
@@ -37,11 +41,11 @@ Before finishing any task: type-check, lint, and run the tests for the files you
 ## Supabase rules
 
 - supabase-js returns `{ data, error }` and does not throw. Always check `error` and convert it to a Nest exception.
-- The Supabase client currently lives in `src/features/auth/supabase-auth.client.ts`. Do not import it from other features; a shared Supabase module is needed once a second feature requires database access.
-- The service role / secret key bypasses Row Level Security. Any code using it must enforce authorization (ownership checks) in NestJS. Never expose this key in responses or logs.
+- Two Supabase client shapes live in `src/shared/supabase/`: `SUPABASE_CLIENT` (anon-key singleton, no user session — only for Supabase Auth calls like `signUp`/`signInWithPassword`/`getUser`) and `REQUEST_SUPABASE_CLIENT` (request-scoped, carries the caller's bearer token so `auth.uid()` resolves under RLS — use this for every query against an RLS-protected table). Never query a data table with `SUPABASE_CLIENT`.
+- No feature currently uses the service role / secret key — RLS is the authorization boundary for all data access so far. If a feature genuinely needs it, any code using it must enforce authorization (ownership checks) in NestJS, and never expose the key in responses or logs.
+- Every table has Row Level Security enabled; a new table without RLS is a bug, not an oversight to fix later.
 - Multi-step writes that must be atomic go into a Postgres function called with `.rpc()`.
-- Schema changes are made only through Supabase CLI migrations, never in the dashboard.
-- **TODO:** the `supabase/` folder does not exist yet, so the schema is not under version control. Run `supabase init`, `supabase link`, and `supabase db pull` before the first schema change.
+- Schema changes are made only through Supabase CLI migrations (`supabase/migrations/`), never in the dashboard. The schema is under version control; treat `supabase/migrations/` as the source of truth and read recent migrations for naming/RLS conventions before writing a new one.
 - Never run commands against the remote Supabase project (`db push`, `link`, `pull`, remote resets) without explicit confirmation.
 
 ## Subagents (`.claude/agents/`)
@@ -70,3 +74,4 @@ For a new feature, follow this order (or run `/new-feature <description>`):
 5. Implement service logic.
 6. `test-writer` and `auth-security-reviewer` — can run in parallel.
 7. Fix findings, then run type-check, lint, and all tests.
+8. Ship: run `/pr` (see `.claude/commands/pr.md`) — writes `docs/specs/<feature>.md` and `docs/handoffs/<feature>.md`, branches, commits, and opens a PR to `main`. Always stops for confirmation before pushing or opening the PR — never push or open a PR unattended.

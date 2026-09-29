@@ -47,3 +47,7 @@ Fix all Critical and High security findings and any failing tests. List Medium a
 ## Phase 7: Report
 
 Run `npx tsc --noEmit`, `npx oxlint`, and the full test suite. Then summarize: files created or changed, migrations added, endpoints, test results, remaining security findings, and any follow-up work.
+
+## Phase 8: Ship
+
+Follow `.claude/commands/pr.md` to write the docs, branch, commit, and open the PR for this feature.
