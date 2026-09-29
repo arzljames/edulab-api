@@ -1,8 +1,15 @@
 import { Module } from '@nestjs/common';
+import { APP_GUARD } from '@nestjs/core';
+import { ConfigModule } from '@nestjs/config';
 import { createObserveModule } from '@nestjs/observe';
+import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { AuthModule } from './features/auth/auth.module';
+import { ProfilesModule } from './features/profiles/profiles.module';
+import { ResourcesModule } from './features/resources/resources.module';
+import { UploadsModule } from './features/uploads/uploads.module';
+import { SharedSupabaseModule } from './shared/supabase/supabase.module';
 
 export const { ObserveModule, ObserveInstrument } = createObserveModule();
 
@@ -18,8 +25,20 @@ const observeImports =
       ];
 
 @Module({
-  imports: [...observeImports, AuthModule],
+  imports: [
+    ConfigModule.forRoot({ isGlobal: true }),
+    ThrottlerModule.forRoot([{ ttl: 60_000, limit: 100 }]),
+    ...observeImports,
+    SharedSupabaseModule,
+    AuthModule,
+    ResourcesModule,
+    ProfilesModule,
+    UploadsModule,
+  ],
   controllers: [AppController],
-  providers: [AppService],
+  providers: [
+    AppService,
+    { provide: APP_GUARD, useClass: ThrottlerGuard },
+  ],
 })
 export class AppModule {}

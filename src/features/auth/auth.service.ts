@@ -1,229 +1,125 @@
 import {
   BadRequestException,
+  ConflictException,
+  Inject,
   Injectable,
+  InternalServerErrorException,
+  Logger,
   UnauthorizedException,
+  UnprocessableEntityException,
 } from '@nestjs/common';
-import type { Provider, Session, User } from '@supabase/supabase-js';
-import type { RefreshSessionDto } from './dto/refresh-session.dto';
-import type { SignInWithOAuthDto } from './dto/sign-in-with-oauth.dto';
-import type { SignInWithPasswordDto } from './dto/sign-in-with-password.dto';
-import type { SignInWithSsoDto } from './dto/sign-in-with-sso.dto';
-import type { SignUpWithPasswordDto } from './dto/sign-up-with-password.dto';
-import type {
-  AuthRedirectResponse,
-  AuthSession,
-  AuthSessionResponse,
-  AuthUser,
-  SignOutResponse,
-} from './interfaces/auth-response.interface';
-import { SupabaseAuthClient } from './supabase-auth.client';
-
-type SupabaseAuthError = {
-  message?: string;
-  status?: number;
-};
+import type { ConfigType } from '@nestjs/config';
+import type { Session, SupabaseClient, User } from '@supabase/supabase-js';
+import type { AuthenticatedUser } from '../../shared/auth/interfaces/authenticated-user.interface';
+import type { Database } from '../../shared/supabase/database.types';
+import supabaseConfig from '../../shared/supabase/supabase-config';
+import {
+  createScopedSupabaseClient,
+  SUPABASE_CLIENT,
+} from '../../shared/supabase/supabase-client.provider';
+import type { AuthResponseDto } from './dto/auth-response.dto';
+import type { CurrentUserDto } from './dto/current-user.dto';
+import type { LoginDto } from './dto/login.dto';
+import type { RefreshTokenDto } from './dto/refresh-token.dto';
+import type { SignUpDto } from './dto/sign-up.dto';
 
 @Injectable()
 export class AuthService {
-  constructor(private readonly supabaseAuth: SupabaseAuthClient) {}
+  private readonly logger = new Logger(AuthService.name);
 
-  async signUpWithPassword(
-    dto: SignUpWithPasswordDto,
-  ): Promise<AuthSessionResponse> {
-    const email = this.requireString(dto?.email, 'email');
-    const password = this.requireString(dto?.password, 'password');
+  constructor(
+    @Inject(SUPABASE_CLIENT)
+    private readonly supabase: SupabaseClient<Database>,
+    @Inject(supabaseConfig.KEY)
+    private readonly config: ConfigType<typeof supabaseConfig>,
+  ) {}
 
-    const { data, error } = await this.supabaseAuth.client.auth.signUp({
-      email,
-      password,
-      options: {
-        data: dto?.metadata,
-        emailRedirectTo: dto?.redirectTo,
-      },
+  async signUp(dto: SignUpDto): Promise<AuthResponseDto> {
+    const { data, error } = await this.supabase.auth.signUp({
+      email: dto.email,
+      password: dto.password,
     });
 
-    this.throwIfAuthError(error);
+    if (error) {
+      this.logger.warn(`Sign up failed for ${dto.email}: ${error.message}`);
 
-    return this.toSessionResponse(data.user, data.session);
-  }
+      if (error.status === 422 || error.code === 'user_already_exists') {
+        throw new ConflictException('An account with this email already exists.');
+      }
 
-  async signInWithPassword(
-    dto: SignInWithPasswordDto,
-  ): Promise<AuthSessionResponse> {
-    const email = this.requireString(dto?.email, 'email');
-    const password = this.requireString(dto?.password, 'password');
-
-    const { data, error } =
-      await this.supabaseAuth.client.auth.signInWithPassword({
-        email,
-        password,
-      });
-
-    this.throwIfAuthError(error);
-
-    return this.toSessionResponse(data.user, data.session);
-  }
-
-  async signInWithOAuth(
-    dto: SignInWithOAuthDto,
-  ): Promise<AuthRedirectResponse> {
-    const provider = this.requireString(dto?.provider, 'provider');
-
-    const { data, error } =
-      await this.supabaseAuth.client.auth.signInWithOAuth({
-        provider: provider as Provider,
-        options: {
-          redirectTo: dto?.redirectTo,
-          scopes: dto?.scopes,
-          queryParams: dto?.queryParams,
-          skipBrowserRedirect: true,
-        },
-      });
-
-    this.throwIfAuthError(error);
-
-    if (!data.url) {
-      throw new BadRequestException('Supabase did not return an OAuth URL.');
+      throw new BadRequestException(error.message);
     }
 
-    return {
-      provider,
-      url: data.url,
-    };
-  }
-
-  async signInWithSso(dto: SignInWithSsoDto): Promise<AuthRedirectResponse> {
-    if (!dto?.domain && !dto?.providerId) {
-      throw new BadRequestException('domain or providerId is required.');
+    if (!data.session || !data.user) {
+      throw new UnprocessableEntityException(
+        'Account created. Check your email to confirm your account before logging in.',
+      );
     }
 
-    const credentials = dto.providerId
-      ? {
-          providerId: dto.providerId,
-          options: {
-            redirectTo: dto?.redirectTo,
-            skipBrowserRedirect: true,
-          },
-        }
-      : {
-          domain: this.requireString(dto.domain, 'domain'),
-          options: {
-            redirectTo: dto?.redirectTo,
-            skipBrowserRedirect: true,
-          },
-        };
+    return this.toAuthResponse(data.session, data.user);
+  }
 
-    const { data, error } =
-      await this.supabaseAuth.client.auth.signInWithSSO(credentials);
+  async login(dto: LoginDto): Promise<AuthResponseDto> {
+    const { data, error } = await this.supabase.auth.signInWithPassword({
+      email: dto.email,
+      password: dto.password,
+    });
 
-    this.throwIfAuthError(error);
-
-    if (!data?.url) {
-      throw new BadRequestException('Supabase did not return an SSO URL.');
+    if (error || !data.session || !data.user) {
+      this.logger.warn(`Login failed for ${dto.email}: ${error?.message}`);
+      throw new UnauthorizedException('Invalid email or password.');
     }
 
-    return {
-      url: data.url,
-    };
+    return this.toAuthResponse(data.session, data.user);
   }
 
-  async refreshSession(dto: RefreshSessionDto): Promise<AuthSessionResponse> {
-    const refreshToken = this.requireString(dto?.refreshToken, 'refreshToken');
+  async refresh(dto: RefreshTokenDto): Promise<AuthResponseDto> {
+    const { data, error } = await this.supabase.auth.refreshSession({
+      refresh_token: dto.refreshToken,
+    });
 
-    const { data, error } =
-      await this.supabaseAuth.client.auth.refreshSession({
-        refresh_token: refreshToken,
-      });
-
-    this.throwIfAuthError(error);
-
-    return this.toSessionResponse(data.user, data.session);
-  }
-
-  async getUser(accessToken: string): Promise<AuthUser> {
-    const { data, error } =
-      await this.supabaseAuth.client.auth.getUser(accessToken);
-
-    if (error || !data.user) {
-      throw new UnauthorizedException(error?.message ?? 'Invalid auth token.');
+    if (error || !data.session || !data.user) {
+      this.logger.warn(`Session refresh failed: ${error?.message}`);
+      throw new UnauthorizedException('Invalid or expired refresh token.');
     }
 
-    return this.toUser(data.user);
+    return this.toAuthResponse(data.session, data.user);
   }
 
-  async signOut(accessToken: string): Promise<SignOutResponse> {
-    const admin = this.supabaseAuth.admin;
+  async logout(accessToken: string): Promise<void> {
+    // A plain `auth.signOut()` reads the session from the client's internal
+    // storage, which is always empty here (persistSession: false, no session
+    // was ever loaded into this scoped client). Revoking a specific token's
+    // session requires the lower-level endpoint, invoked explicitly with the
+    // token — this does not require the service-role key, only the caller's
+    // own valid JWT.
+    const scopedClient = createScopedSupabaseClient(this.config, accessToken);
+    const { error } = await scopedClient.auth.admin.signOut(
+      accessToken,
+      'global',
+    );
 
-    if (!admin) {
-      return {
-        signedOut: true,
-        remoteSessionRevoked: false,
-      };
+    if (error) {
+      this.logger.error(`Logout failed: ${error.message}`);
+      throw new InternalServerErrorException('Failed to end the session.');
     }
-
-    const { error } = await admin.auth.admin.signOut(accessToken);
-
-    this.throwIfAuthError(error);
-
-    return {
-      signedOut: true,
-      remoteSessionRevoked: true,
-    };
   }
 
-  private requireString(value: unknown, fieldName: string): string {
-    if (typeof value !== 'string' || value.trim().length === 0) {
-      throw new BadRequestException(`${fieldName} is required.`);
-    }
-
-    return value.trim();
+  async getMe(user: AuthenticatedUser): Promise<CurrentUserDto> {
+    return { id: user.id, email: user.email ?? '' };
   }
 
-  private throwIfAuthError(error: SupabaseAuthError | null): void {
-    if (!error) {
-      return;
-    }
-
-    if (error.status === 401 || error.status === 403) {
-      throw new UnauthorizedException(error.message);
-    }
-
-    throw new BadRequestException(error.message);
-  }
-
-  private toSessionResponse(
-    user: User | null,
-    session: Session | null,
-  ): AuthSessionResponse {
-    return {
-      user: user ? this.toUser(user) : null,
-      session: session ? this.toSession(session) : null,
-    };
-  }
-
-  private toUser(user: User): AuthUser {
-    return {
-      id: user.id,
-      email: user.email,
-      phone: user.phone,
-      role: user.role,
-      appMetadata: user.app_metadata,
-      userMetadata: user.user_metadata,
-      createdAt: user.created_at,
-      updatedAt: user.updated_at,
-      lastSignInAt: user.last_sign_in_at,
-    };
-  }
-
-  private toSession(session: Session): AuthSession {
+  private toAuthResponse(session: Session, user: User): AuthResponseDto {
     return {
       accessToken: session.access_token,
       refreshToken: session.refresh_token,
-      tokenType: session.token_type,
-      expiresIn: session.expires_in,
-      expiresAt: session.expires_at,
-      providerToken: session.provider_token,
-      providerRefreshToken: session.provider_refresh_token,
+      expiresAt:
+        session.expires_at ??
+        Math.floor(Date.now() / 1000) + session.expires_in,
+      user: {
+        id: user.id,
+        email: user.email ?? '',
+      },
     };
   }
 }
