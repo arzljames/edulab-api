@@ -17,7 +17,7 @@ Before finishing any task: type-check, lint, and run the tests for the files you
 
 ## Project structure
 
-- `src/main.ts` — bootstrap (global pipes, `/api/v1` prefix, CORS, Swagger at `/docs`)
+- `src/main.ts` — bootstrap (global pipes, `/api/v1` prefix, CORS, Swagger at `/api/v1/docs`)
 - `src/app.module.ts` — root module; every feature module is registered here
 - `src/shared/` — cross-feature code, imported by more than one `src/features/*` module. `src/shared/supabase/` (client providers, config) and `src/shared/auth/` (`JwtAuthGuard`, `@CurrentUser()`, `AuthenticatedUser`) are the current shared modules. Ask before adding a new top-level folder here.
 - `src/features/<feature>/` — one folder per domain feature (`auth`, `resources`, `profiles`, `uploads`):
@@ -26,8 +26,13 @@ Before finishing any task: type-check, lint, and run the tests for the files you
   - `<feature>-config.ts` — feature-specific configuration (only for config not already in `src/shared/supabase/supabase-config.ts`)
 - `supabase/` — Supabase CLI project: `migrations/` (source of truth for schema), `config.toml`, generated `database.types.ts` (re-exported from `src/shared/supabase/database.types.ts` for a stable in-`src` import path)
 - `test/` — e2e tests
-- `docs/specs/<feature>.md` — what a feature does and why, written after it ships (see `/pr`)
-- `docs/handoffs/<feature>.md` — frontend integration doc per feature, written after it ships (see `/pr`)
+
+## Docs (Claude Doc artifacts, not repo files)
+
+Feature specs and the frontend integration handoff live as Claude Doc artifacts, not files in this repo — see `/pr`. Two living docs, one section per feature, updated in place as features ship (never create a new doc per feature):
+
+- **Feature Specs** — internal reference (data model, access rules, endpoints, business logic, security notes, tests) — <https://claude.ai/artifact/N6kqC28oAnnFs6Lqh891cJ>
+- **Frontend Integration Handoff** — written for the frontend session (endpoints, request/response examples, gotchas) — <https://claude.ai/artifact/KyK2hopVhbgHnvYt7UrL38>
 
 ## Conventions
 
