@@ -5,6 +5,7 @@ import { createObserveModule } from '@nestjs/observe';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
+import { ActivityLogModule } from './features/activity-log/activity-log.module';
 import { AuthModule } from './features/auth/auth.module';
 import { ProfilesModule } from './features/profiles/profiles.module';
 import { ResourcesModule } from './features/resources/resources.module';
@@ -31,6 +32,7 @@ const observeImports =
     ...observeImports,
     SharedSupabaseModule,
     AuthModule,
+    ActivityLogModule,
     ResourcesModule,
     ProfilesModule,
     UploadsModule,

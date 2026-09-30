@@ -1,5 +1,6 @@
 import { BadRequestException, Inject, Injectable, Logger } from '@nestjs/common';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { ActivityLogService } from '../activity-log/activity-log.service';
 import type { Database } from '../../shared/supabase/database.types';
 import { REQUEST_SUPABASE_CLIENT } from '../../shared/supabase/request-supabase-client.provider';
 import type { ResourceResponseDto } from './dto/resource-response.dto';
@@ -17,6 +18,7 @@ export class BookmarksService {
   constructor(
     @Inject(REQUEST_SUPABASE_CLIENT)
     private readonly supabase: SupabaseClient<Database>,
+    private readonly activityLogService: ActivityLogService,
   ) {}
 
   async bookmark(resourceId: string, userId: string): Promise<void> {
@@ -38,6 +40,12 @@ export class BookmarksService {
       );
       throw new BadRequestException('Failed to bookmark resource.');
     }
+
+    await this.activityLogService.record(
+      'Bookmarked a resource',
+      undefined,
+      'bookmark',
+    );
   }
 
   async unbookmark(resourceId: string, userId: string): Promise<void> {
