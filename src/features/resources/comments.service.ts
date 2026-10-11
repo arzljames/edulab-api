@@ -6,6 +6,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { ActivityLogService } from '../activity-log/activity-log.service';
 import type { Database } from '../../shared/supabase/database.types';
 import { REQUEST_SUPABASE_CLIENT } from '../../shared/supabase/request-supabase-client.provider';
 import type { CommentResponseDto } from './dto/comment-response.dto';
@@ -33,6 +34,7 @@ export class CommentsService {
   constructor(
     @Inject(REQUEST_SUPABASE_CLIENT)
     private readonly supabase: SupabaseClient<Database>,
+    private readonly activityLogService: ActivityLogService,
   ) {}
 
   async create(
@@ -59,6 +61,12 @@ export class CommentsService {
       );
       throw new BadRequestException('Failed to create comment.');
     }
+
+    await this.activityLogService.record(
+      'Posted a comment',
+      dto.comment,
+      'message-circle',
+    );
 
     return toCommentResponse(data);
   }

@@ -79,4 +79,4 @@ For a new feature, follow this order (or run `/new-feature <description>`):
 5. Implement service logic.
 6. `test-writer` and `auth-security-reviewer` — can run in parallel.
 7. Fix findings, then run type-check, lint, and all tests.
-8. Ship: run `/pr` (see `.claude/commands/pr.md`) — writes `docs/specs/<feature>.md` and `docs/handoffs/<feature>.md`, branches, commits, and opens a PR to `main`. Always stops for confirmation before pushing or opening the PR — never push or open a PR unattended.
+8. Ship: run `/pr` (see `.claude/commands/pr.md`) — updates the two living docs (see "Docs" above), branches, commits, and opens a PR to `main`. Always stops for confirmation before pushing or opening the PR — never push or open a PR unattended.

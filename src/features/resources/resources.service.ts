@@ -6,6 +6,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { ActivityLogService } from '../activity-log/activity-log.service';
 import type { Database } from '../../shared/supabase/database.types';
 import { REQUEST_SUPABASE_CLIENT } from '../../shared/supabase/request-supabase-client.provider';
 import type { CreateResourceDto } from './dto/create-resource.dto';
@@ -31,6 +32,7 @@ export class ResourcesService {
   constructor(
     @Inject(REQUEST_SUPABASE_CLIENT)
     private readonly supabase: SupabaseClient<Database>,
+    private readonly activityLogService: ActivityLogService,
   ) {}
 
   async create(
@@ -62,6 +64,12 @@ export class ResourcesService {
     }
 
     const tags = await this.syncTags(resource.resource_id, dto.tags);
+
+    await this.activityLogService.record(
+      'Created resource',
+      resource.title,
+      'plus-circle',
+    );
 
     return toResourceResponse(resource, tags);
   }
@@ -205,6 +213,14 @@ export class ResourcesService {
 
     const tags = await this.syncTags(id, dto.tags);
 
+    if (dto.status === 'published') {
+      await this.activityLogService.record(
+        'Published resource',
+        resource.title,
+        'megaphone',
+      );
+    }
+
     return toResourceResponse(resource, tags);
   }
 
@@ -214,7 +230,7 @@ export class ResourcesService {
       .delete()
       .eq('resource_id', id)
       .eq('user_id', userId)
-      .select('resource_id')
+      .select('resource_id, title')
       .maybeSingle();
 
     if (error) {
@@ -225,6 +241,12 @@ export class ResourcesService {
     if (!data) {
       throw new NotFoundException('Resource not found.');
     }
+
+    await this.activityLogService.record(
+      'Deleted resource',
+      data.title,
+      'trash-2',
+    );
   }
 
   async findAllTags(): Promise<TagResponseDto[]> {

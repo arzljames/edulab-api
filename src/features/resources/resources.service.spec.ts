@@ -1,5 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { ActivityLogService } from '../activity-log/activity-log.service';
 import { REQUEST_SUPABASE_CLIENT } from '../../shared/supabase/request-supabase-client.provider';
 import { ResourceVisibility } from './dto/create-resource.dto';
 import { ResourceStatus } from './dto/update-resource.dto';
@@ -25,13 +26,17 @@ describe('ResourcesService', () => {
     updated_at: '2026-01-10T08:30:00.000Z',
   };
 
+  let activityLogService: { record: jest.Mock };
+
   beforeEach(async () => {
     supabase = createSupabaseMock();
+    activityLogService = { record: jest.fn() };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         ResourcesService,
         { provide: REQUEST_SUPABASE_CLIENT, useValue: supabase },
+        { provide: ActivityLogService, useValue: activityLogService },
       ],
     }).compile();
 
@@ -57,6 +62,11 @@ describe('ResourcesService', () => {
       expect(supabase.from).toHaveBeenNthCalledWith(2, 'resource_tags');
       expect(result).toEqual(
         expect.objectContaining({ id: 'r1', title: resourceRow.title, tags: [] }),
+      );
+      expect(activityLogService.record).toHaveBeenCalledWith(
+        'Created resource',
+        resourceRow.title,
+        'plus-circle',
       );
     });
 
@@ -98,6 +108,11 @@ describe('ResourcesService', () => {
         { resource_id: 'r1', tag_id: 'tag-2' },
       ]);
       expect(result.tags).toEqual(['fractions', 'worksheet']);
+      expect(activityLogService.record).toHaveBeenCalledWith(
+        'Created resource',
+        resourceRow.title,
+        'plus-circle',
+      );
     });
 
     it('skips the upsert/link steps when dto.tags is an empty (or all-blank) array', async () => {
@@ -115,9 +130,14 @@ describe('ResourcesService', () => {
 
       expect(supabase.from).toHaveBeenCalledTimes(2);
       expect(result.tags).toEqual([]);
+      expect(activityLogService.record).toHaveBeenCalledWith(
+        'Created resource',
+        resourceRow.title,
+        'plus-circle',
+      );
     });
 
-    it('throws BadRequestException when the insert fails', async () => {
+    it('throws BadRequestException when the insert fails, without recording activity', async () => {
       supabase.from.mockReturnValueOnce(
         createQueryBuilder({ data: null, error: { message: 'insert failed' } }),
       );
@@ -126,6 +146,7 @@ describe('ResourcesService', () => {
         service.create('user-1', { title: 'x' }),
       ).rejects.toBeInstanceOf(BadRequestException);
       expect(supabase.from).toHaveBeenCalledTimes(1);
+      expect(activityLogService.record).not.toHaveBeenCalled();
     });
   });
 
@@ -324,6 +345,39 @@ describe('ResourcesService', () => {
       expect(updateBuilder.eq).toHaveBeenCalledWith('user_id', 'user-1');
       expect(result.title).toBe('New title');
       expect(result.tags).toEqual(['new-tag']);
+      expect(activityLogService.record).not.toHaveBeenCalled();
+    });
+
+    it('records "Published resource" activity when dto.status is published', async () => {
+      const publishedRow = { ...resourceRow, status: ResourceStatus.PUBLISHED };
+      const updateBuilder = createQueryBuilder({ data: publishedRow, error: null });
+      const tagsLookupBuilder = createQueryBuilder({ data: [], error: null });
+
+      supabase.from
+        .mockReturnValueOnce(updateBuilder)
+        .mockReturnValueOnce(tagsLookupBuilder);
+
+      await service.update('r1', 'user-1', { status: ResourceStatus.PUBLISHED });
+
+      expect(activityLogService.record).toHaveBeenCalledWith(
+        'Published resource',
+        publishedRow.title,
+        'megaphone',
+      );
+    });
+
+    it('does not record activity when dto.status is set to something other than published', async () => {
+      const draftRow = { ...resourceRow, status: ResourceStatus.DRAFT };
+      const updateBuilder = createQueryBuilder({ data: draftRow, error: null });
+      const tagsLookupBuilder = createQueryBuilder({ data: [], error: null });
+
+      supabase.from
+        .mockReturnValueOnce(updateBuilder)
+        .mockReturnValueOnce(tagsLookupBuilder);
+
+      await service.update('r1', 'user-1', { status: ResourceStatus.DRAFT });
+
+      expect(activityLogService.record).not.toHaveBeenCalled();
     });
 
     it('fetches the existing row without updating when the payload is empty, leaving tags untouched', async () => {
@@ -380,8 +434,11 @@ describe('ResourcesService', () => {
   });
 
   describe('remove', () => {
-    it('deletes the resource scoped to id + owner', async () => {
-      const builder = createQueryBuilder({ data: { resource_id: 'r1' }, error: null });
+    it('deletes the resource scoped to id + owner and records the deletion', async () => {
+      const builder = createQueryBuilder({
+        data: { resource_id: 'r1', title: resourceRow.title },
+        error: null,
+      });
       supabase.from.mockReturnValueOnce(builder);
 
       await service.remove('r1', 'user-1');
@@ -389,9 +446,15 @@ describe('ResourcesService', () => {
       expect(builder.delete).toHaveBeenCalled();
       expect(builder.eq).toHaveBeenCalledWith('resource_id', 'r1');
       expect(builder.eq).toHaveBeenCalledWith('user_id', 'user-1');
+      expect(builder.select).toHaveBeenCalledWith('resource_id, title');
+      expect(activityLogService.record).toHaveBeenCalledWith(
+        'Deleted resource',
+        resourceRow.title,
+        'trash-2',
+      );
     });
 
-    it('throws NotFoundException when no row matched', async () => {
+    it('throws NotFoundException when no row matched, without recording activity', async () => {
       supabase.from.mockReturnValueOnce(
         createQueryBuilder({ data: null, error: null }),
       );
@@ -399,9 +462,10 @@ describe('ResourcesService', () => {
       await expect(service.remove('missing', 'user-1')).rejects.toBeInstanceOf(
         NotFoundException,
       );
+      expect(activityLogService.record).not.toHaveBeenCalled();
     });
 
-    it('throws BadRequestException on error', async () => {
+    it('throws BadRequestException on error, without recording activity', async () => {
       supabase.from.mockReturnValueOnce(
         createQueryBuilder({ data: null, error: { message: 'boom' } }),
       );
@@ -409,6 +473,7 @@ describe('ResourcesService', () => {
       await expect(service.remove('r1', 'user-1')).rejects.toBeInstanceOf(
         BadRequestException,
       );
+      expect(activityLogService.record).not.toHaveBeenCalled();
     });
   });
 

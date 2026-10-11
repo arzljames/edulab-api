@@ -330,7 +330,27 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      log_activity: {
+        Args: {
+          p_action_title: string
+          p_description?: string
+          p_icon?: string
+        }
+        Returns: {
+          action_title: string
+          audit_log_id: string
+          created_at: string
+          description: string | null
+          icon: string | null
+          user_id: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "audit_logs"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
     }
     Enums: {
       resource_status: "draft" | "published"

@@ -13,7 +13,7 @@ import {
 
 describe('Resources (e2e)', () => {
   let app: INestApplication<App>;
-  let supabase: { from: jest.Mock; auth: { getUser: jest.Mock } };
+  let supabase: { from: jest.Mock; rpc: jest.Mock; auth: { getUser: jest.Mock } };
 
   const mockUser = {
     id: 'user-1',
@@ -52,7 +52,14 @@ describe('Resources (e2e)', () => {
   }
 
   beforeEach(async () => {
-    supabase = { from: jest.fn(), auth: { getUser: jest.fn() } };
+    supabase = {
+      from: jest.fn(),
+      // ActivityLogService.record() calls this after a successful mutation
+      // and never throws on failure — default to a clean success so tests
+      // that don't care about activity logging don't need to configure it.
+      rpc: jest.fn().mockResolvedValue({ data: null, error: null }),
+      auth: { getUser: jest.fn() },
+    };
 
     const moduleFixture: TestingModule = await Test.createTestingModule({
       imports: [AppModule],
@@ -175,6 +182,12 @@ describe('Resources (e2e)', () => {
       expect(createResponse.body).toEqual(
         expect.objectContaining({ id: resourceId, title: resourceRow.title, tags: [] }),
       );
+      expect(supabase.rpc).toHaveBeenCalledWith('log_activity', {
+        p_action_title: 'Created resource',
+        p_description: resourceRow.title,
+        p_icon: 'plus-circle',
+      });
+      supabase.rpc.mockClear();
 
       // findOne(): single select with tags.
       queueFrom(createQueryBuilder({ data: resourceRow, error: null }));
@@ -199,14 +212,27 @@ describe('Resources (e2e)', () => {
         .expect(200);
 
       expect(updateResponse.body.title).toBe('Updated title');
+      // dto.status wasn't 'published', so no activity should be recorded.
+      expect(supabase.rpc).not.toHaveBeenCalled();
 
-      // remove(): delete scoped to id + owner.
-      queueFrom(createQueryBuilder({ data: { resource_id: resourceId }, error: null }));
+      // remove(): delete scoped to id + owner (also selects title, for the activity log).
+      queueFrom(
+        createQueryBuilder({
+          data: { resource_id: resourceId, title: updatedRow.title },
+          error: null,
+        }),
+      );
 
       await request(app.getHttpServer())
         .delete(`/api/v1/resources/${resourceId}`)
         .set('Authorization', 'Bearer valid-token')
         .expect(204);
+
+      expect(supabase.rpc).toHaveBeenCalledWith('log_activity', {
+        p_action_title: 'Deleted resource',
+        p_description: updatedRow.title,
+        p_icon: 'trash-2',
+      });
     });
   });
 
@@ -222,6 +248,12 @@ describe('Resources (e2e)', () => {
         .post(`/api/v1/resources/${resourceId}/bookmark`)
         .set('Authorization', 'Bearer valid-token')
         .expect(201);
+
+      expect(supabase.rpc).toHaveBeenCalledWith('log_activity', {
+        p_action_title: 'Bookmarked a resource',
+        p_description: undefined,
+        p_icon: 'bookmark',
+      });
     });
 
     it('stars a resource', async () => {
@@ -235,6 +267,12 @@ describe('Resources (e2e)', () => {
         .post(`/api/v1/resources/${resourceId}/star`)
         .set('Authorization', 'Bearer valid-token')
         .expect(201);
+
+      expect(supabase.rpc).toHaveBeenCalledWith('log_activity', {
+        p_action_title: 'Starred a resource',
+        p_description: undefined,
+        p_icon: 'star',
+      });
     });
 
     it('comments on a resource', async () => {
@@ -267,6 +305,11 @@ describe('Resources (e2e)', () => {
         comment: 'Great resource!',
         createdAt: commentRow.created_at,
         updatedAt: commentRow.updated_at,
+      });
+      expect(supabase.rpc).toHaveBeenCalledWith('log_activity', {
+        p_action_title: 'Posted a comment',
+        p_description: 'Great resource!',
+        p_icon: 'message-circle',
       });
     });
   });

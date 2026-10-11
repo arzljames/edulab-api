@@ -1,5 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { ActivityLogService } from '../activity-log/activity-log.service';
 import { REQUEST_SUPABASE_CLIENT } from '../../shared/supabase/request-supabase-client.provider';
 import { CommentsService } from './comments.service';
 import { createQueryBuilder, createSupabaseMock } from './supabase-query-builder.mock';
@@ -18,13 +19,17 @@ describe('CommentsService', () => {
     updated_at: '2026-01-10T08:30:00.000Z',
   };
 
+  let activityLogService: { record: jest.Mock };
+
   beforeEach(async () => {
     supabase = createSupabaseMock();
+    activityLogService = { record: jest.fn() };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         CommentsService,
         { provide: REQUEST_SUPABASE_CLIENT, useValue: supabase },
+        { provide: ActivityLogService, useValue: activityLogService },
       ],
     }).compile();
 
@@ -63,6 +68,11 @@ describe('CommentsService', () => {
         createdAt: commentRow.created_at,
         updatedAt: commentRow.updated_at,
       });
+      expect(activityLogService.record).toHaveBeenCalledWith(
+        'Posted a comment',
+        commentRow.comment,
+        'message-circle',
+      );
     });
 
     it('passes through parentCommentId for threaded replies', async () => {
@@ -83,9 +93,14 @@ describe('CommentsService', () => {
       });
 
       expect(result.parentCommentId).toBe('c1');
+      expect(activityLogService.record).toHaveBeenCalledWith(
+        'Posted a comment',
+        'A reply',
+        'message-circle',
+      );
     });
 
-    it('throws NotFoundException without inserting when the resource is not visible', async () => {
+    it('throws NotFoundException without inserting or recording activity when the resource is not visible', async () => {
       supabase.from.mockReturnValueOnce(
         createQueryBuilder({ data: null, error: null }),
       );
@@ -94,9 +109,10 @@ describe('CommentsService', () => {
         service.create('missing', 'user-1', { comment: 'x' }),
       ).rejects.toBeInstanceOf(NotFoundException);
       expect(supabase.from).toHaveBeenCalledTimes(1);
+      expect(activityLogService.record).not.toHaveBeenCalled();
     });
 
-    it('throws BadRequestException when the insert fails', async () => {
+    it('throws BadRequestException when the insert fails, without recording activity', async () => {
       supabase.from
         .mockReturnValueOnce(
           createQueryBuilder({ data: { resource_id: 'r1' }, error: null }),
@@ -108,6 +124,7 @@ describe('CommentsService', () => {
       await expect(
         service.create('r1', 'user-1', { comment: 'x' }),
       ).rejects.toBeInstanceOf(BadRequestException);
+      expect(activityLogService.record).not.toHaveBeenCalled();
     });
   });
 

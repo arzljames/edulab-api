@@ -1,5 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { ActivityLogService } from '../activity-log/activity-log.service';
 import { REQUEST_SUPABASE_CLIENT } from '../../shared/supabase/request-supabase-client.provider';
 import { BookmarksService } from './bookmarks.service';
 import { createQueryBuilder, createSupabaseMock } from './supabase-query-builder.mock';
@@ -8,13 +9,17 @@ describe('BookmarksService', () => {
   let service: BookmarksService;
   let supabase: ReturnType<typeof createSupabaseMock>;
 
+  let activityLogService: { record: jest.Mock };
+
   beforeEach(async () => {
     supabase = createSupabaseMock();
+    activityLogService = { record: jest.fn() };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         BookmarksService,
         { provide: REQUEST_SUPABASE_CLIENT, useValue: supabase },
+        { provide: ActivityLogService, useValue: activityLogService },
       ],
     }).compile();
 
@@ -40,9 +45,14 @@ describe('BookmarksService', () => {
         { user_id: 'user-1', resource_id: 'r1' },
         { onConflict: 'user_id,resource_id', ignoreDuplicates: true },
       );
+      expect(activityLogService.record).toHaveBeenCalledWith(
+        'Bookmarked a resource',
+        undefined,
+        'bookmark',
+      );
     });
 
-    it('throws NotFoundException without upserting when the resource is not visible', async () => {
+    it('throws NotFoundException without upserting or recording activity when the resource is not visible', async () => {
       supabase.from.mockReturnValueOnce(
         createQueryBuilder({ data: null, error: null }),
       );
@@ -51,9 +61,10 @@ describe('BookmarksService', () => {
         NotFoundException,
       );
       expect(supabase.from).toHaveBeenCalledTimes(1);
+      expect(activityLogService.record).not.toHaveBeenCalled();
     });
 
-    it('throws BadRequestException when the upsert fails', async () => {
+    it('throws BadRequestException when the upsert fails, without recording activity', async () => {
       supabase.from
         .mockReturnValueOnce(
           createQueryBuilder({ data: { resource_id: 'r1' }, error: null }),
@@ -65,6 +76,7 @@ describe('BookmarksService', () => {
       await expect(service.bookmark('r1', 'user-1')).rejects.toBeInstanceOf(
         BadRequestException,
       );
+      expect(activityLogService.record).not.toHaveBeenCalled();
     });
   });
 

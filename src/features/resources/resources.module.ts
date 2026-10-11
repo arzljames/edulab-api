@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { ActivityLogModule } from '../activity-log/activity-log.module';
 import { SharedSupabaseModule } from '../../shared/supabase/supabase.module';
 import { BookmarksController } from './bookmarks.controller';
 import { BookmarksService } from './bookmarks.service';
@@ -16,7 +17,7 @@ import { StarsService } from './stars.service';
  * into their own `src/features/<name>/` modules.
  */
 @Module({
-  imports: [SharedSupabaseModule],
+  imports: [SharedSupabaseModule, ActivityLogModule],
   controllers: [
     ResourcesController,
     TagsController,
